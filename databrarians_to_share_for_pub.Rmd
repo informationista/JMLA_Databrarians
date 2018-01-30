@@ -258,7 +258,7 @@ plot(lik_dat, low.color ="grey78", high.color="grey8", neutral.color="grey45", n
 ```
 
 
-#How many skills do people think are important?
+# How many skills do people think are important?
 Basically, how much do you have to know?  
 
 We just want the likert_based items, which are columns 21:68.  For each row, count up how many times a person has given that rating.
