@@ -5,10 +5,10 @@ date: "May 17, 2017"
 output: html_document
 ---
 
-#About
+# About
 This notebook contains analysis for a study of data librarian competencies and skills.  This code was created using R version 3.3.2
 
-#Data Preparation
+# Data Preparation
 Load required packages and read in data, removing unwanted columns exported automatically from Survey Monkey and rename variables whose names didn't get properly imported.  
 ```{r message = F, warning=F}
 packages <- c("likert", "poLCA", "stringr", "ggplot2", "tidyverse", "dplyr")
@@ -16,12 +16,11 @@ x = sapply(packages, function(x) if(!require(x, character.only = T)) install.pac
 
 #read in the data - assumes your working directory is set to where the data file is
 dat <- read_csv("Sheet_12.csv", skip = 1) %>% 
-  dplyr::select(-c(1:9)) %>% 
   dplyr::rename(`Job title` = `Open-Ended Response`, `Years in current position` = `Open-Ended Response_1`, `Years in librarianship` = `Open-Ended Response_2`, `Other important skills` = `Open-Ended Response_3`, `Additional thoughts or comments` = `Open-Ended Response_4`) 
 
 ```
 
-##Data Wrangling
+## Data Wrangling
 Calculate how many years of experience the person had when they started the job (i.e. subtract years in current job from years in the field total) and put it next to the other year columns.
 ```{r}
 dat <- dat %>% 
@@ -52,10 +51,10 @@ dat <- dat[-5, ]
 ```
 
 
-#Demographic analysis
+# Demographic analysis
 Looking at some characteristics of the people who responded.
 
-##Job titles
+## Job titles
 Convert to lower case to compare and look at how often some common terms occur.
 ```{r}
 dat$`Job title` <- tolower(dat$`Job title`)
@@ -69,7 +68,7 @@ for (i in 1:length(word_list)) {
 }
 
 ```
-##Disciplinary support
+## Disciplinary support
 What disciplines do people work in?  Make a chart that shows percentage of people supporting a given discipline.
 ```{r}
 discipline <- data.frame(discipline = names(dat[5:10]), count = colSums(dat[5:10], na.rm = TRUE))
@@ -118,7 +117,7 @@ lapply(dat[, 10],table, dat$`Engineering and/or computer science`)
 
 
 
-##Time spent on data vs non data activities
+## Time spent on data vs non data activities
 First remove any entries where the times are NA, then make charts.
 
 ```{r}
@@ -130,7 +129,7 @@ mean(dat$`Percent of time spent on data-related work`, na.rm= TRUE)
 
 ```
 
-##Years of experience
+## Years of experience
 Some visualizations of how long people have been in their current position and stuff.  Remove anyone who put they had been in their current position longer than their whole career, since this would be impossible.
 
 ```{r}
@@ -155,7 +154,7 @@ n_first <- dat %>% filter(`Years in librarianship` == `Years in current position
 cat("For", n_first, "participants, their current job is their first in the field of librarianship.")
 ```
 
-##Educational Experience
+## Educational Experience
 How many people have various degrees?  Sum up the counts and plot them as a percentage.
 ```{r}
 degrees <- data.frame(degree = names(dat[14:20]), count = colSums(dat[14:20], na.rm = TRUE))
@@ -176,9 +175,7 @@ degrees
 cat(n_degrees, "participants have more than one degree", "\nThe mean number of degrees held is", mean_degrees)
 ```
 
-
-
-#Analysis of Skill/Knowledge Importance Ratings
+# Analysis of Skill/Knowledge Importance Ratings
 Do some data cleaning first. the relevant data (columns 21:68) need to be converted to an organization that ggplot2 can deal with - i.e. switch from wide to long.  
 ```{r}
 ##not all these packages know how to handle tibbles - make a regular data frame instead
@@ -206,7 +203,7 @@ names(subset_cols) <- c("Data Management Skills, Part 1", "Data Management Skill
 ```
 
 
-##Likert scale charts
+## Likert scale charts
 
 ```{r}
 multiplot <- function(..., plotlist=NULL, file, cols=1, layout=NULL) {
@@ -296,7 +293,7 @@ grid.arrange(boxp, density, top = "Distribution of Number of Items Ranked at Eac
 
 
 
-#Cluster Analysis
+# Cluster Analysis
 
 Make a new converting all likert scale responses to one-hot encoded variables, then add back in the non-likert variables.  Also discard that one where the person said they've been in their current position longer than in librarianship total.
 ```{r}
@@ -529,7 +526,7 @@ c(1), c(0))
 
 ```
 
-##Tests of statistical significance
+## Tests of statistical significance
 Let's do some t-tests!
 Mean number of disciplines served
 ```{r}
