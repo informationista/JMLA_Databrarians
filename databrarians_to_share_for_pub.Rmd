@@ -1,0 +1,566 @@
+---
+title: "Data Librarian Competencies"
+author: "Lisa Federer"
+date: "May 17, 2017"
+output: html_document
+---
+
+#About
+This notebook contains analysis for a study of data librarian competencies and skills.  This code was created using R version 3.3.2
+
+#Data Preparation
+Load required packages and read in data, removing unwanted columns exported automatically from Survey Monkey and rename variables whose names didn't get properly imported.  
+```{r message = F, warning=F}
+packages <- c("likert", "poLCA", "stringr", "ggplot2", "tidyverse", "dplyr")
+x = sapply(packages, function(x) if(!require(x, character.only = T)) install.packages(x))
+
+#read in the data - assumes your working directory is set to where the data file is
+dat <- read_csv("Sheet_12.csv", skip = 1) %>% 
+  dplyr::select(-c(1:9)) %>% 
+  dplyr::rename(`Job title` = `Open-Ended Response`, `Years in current position` = `Open-Ended Response_1`, `Years in librarianship` = `Open-Ended Response_2`, `Other important skills` = `Open-Ended Response_3`, `Additional thoughts or comments` = `Open-Ended Response_4`) 
+
+```
+
+##Data Wrangling
+Calculate how many years of experience the person had when they started the job (i.e. subtract years in current job from years in the field total) and put it next to the other year columns.
+```{r}
+dat <- dat %>% 
+  mutate(`Years experience when started position` = `Years in librarianship` - `Years in current position`) %>% 
+  dplyr::select(1:3, `Years experience when started position`, everything())
+```
+
+Convert likert scale variables to ordered factors for easier analysis and charting.
+```{r}
+levs <- c("Don't know or N/A", "Not at all important", "Slightly important", "Important", "Very important", "Absolutely essential")
+
+dat[21:68] <- lapply(dat[21:68], parse_factor, levels = levs)
+```
+
+Survey Monkey does some weird things with columns that allow multiple selections from a list, so clean those up by replacing all non-NA values with a 1.
+```{r}
+fix_rows <- c(5:10, 14:20) #select the offending rows
+dat[fix_rows] <- replace(dat[fix_rows], !is.na(dat[fix_rows]), 1) #make the replacement
+dat[fix_rows] <- replace(dat[fix_rows], is.na(dat[fix_rows]), 0)
+dat[fix_rows] <- sapply(dat[fix_rows], as.numeric) #the replacement gets created as a character var, so switch it to numeric
+
+```
+Some people didn't complete any of the likert scale items at all, so their responses aren't really very helpful.  Partial responses are okay but remove anyone who didn't answer any likert scale questions.  Also participant #5 asked asked to have their response removed in the comments column.
+```{r}
+ind <- apply(dat[21:68], 1, function(x) all(is.na(x)))
+dat <- dat[ !ind, ]
+dat <- dat[-5, ]
+```
+
+
+#Demographic analysis
+Looking at some characteristics of the people who responded.
+
+##Job titles
+Convert to lower case to compare and look at how often some common terms occur.
+```{r}
+dat$`Job title` <- tolower(dat$`Job title`)
+job_titles <- data.frame(table(dat$`Job title`))
+
+word_list <- c("librarian", "data services", "data management", "research data", "informationist", "manager", "director")
+
+for (i in 1:length(word_list)) {
+  sentence <- paste(length(grep(word_list[i], dat$`Job title`)), "job titles contain the word", word_list[i])
+  print(sentence)
+}
+
+```
+##Disciplinary support
+What disciplines do people work in?  Make a chart that shows percentage of people supporting a given discipline.
+```{r}
+discipline <- data.frame(discipline = names(dat[5:10]), count = colSums(dat[5:10], na.rm = TRUE))
+discipline$percent <- discipline$count/nrow(dat) *100
+discipline$label <- paste("n =", discipline$count)
+
+discipline
+ggplot(discipline, aes(x = reorder(discipline, percent), y = percent)) + geom_bar(stat = "identity") + coord_flip() + ylab("Percent of Respondents\nSupporting Discipline") + theme_bw() + ggtitle("Disciplinary Support") + scale_x_discrete(labels = function(x) lapply(strwrap(x, width = 35, simplify = FALSE), paste, collapse="\n")) + theme(plot.title = element_text(hjust = 0.5)) + xlab("Discipline") + geom_text(aes(label = label, x = discipline, y = count), position = position_dodge(width = 0.8), hjust = .8, color = "white")
+
+```
+
+How many people are supporting more than one discipline?
+```{r}
+dat <- dat %>% 
+  mutate(disciplines_served = `Biomedical and/or health sciences` + `Life sciences` + `Physical sciences`+ `Mathematics and/or statistics` + `Engineering and/or computer science` + `Social sciences`)
+n_disciplines <- dat %>% filter(disciplines_served > 1) %>% nrow
+mean_disciplines <- mean(dat$disciplines_served)
+```
+```{r echo = F}
+cat(n_disciplines, "participants serve more than one discipline", "\nThe mean number of disciplines served is", mean_disciplines)
+```
+What are the most common combinations of disciplines for people who support more than one?
+
+Combos with biomed:
+
+```{r}
+lapply(dat[, 6:10],table, dat$`Biomedical and/or health sciences`)
+
+```
+Combos with life sciences
+```{r}
+lapply(dat[, 7:10],table, dat$`Life sciences`)
+```
+Combos with physical sciences
+```{r}
+lapply(dat[, 8:10],table, dat$`Physical sciences`)
+```
+Combos with math
+```{r}
+lapply(dat[, 9:10],table, dat$`Mathematics and/or statistics`)
+```
+Combos with engineering
+```{r}
+lapply(dat[, 10],table, dat$`Engineering and/or computer science`)
+```
+
+
+
+##Time spent on data vs non data activities
+First remove any entries where the times are NA, then make charts.
+
+```{r}
+dat %>% mutate(sum_of_time = `Percent of time spent on other work` + `Percent of time spent on data-related work`) %>% 
+  filter(!is.na(sum_of_time)) %>% ggplot(aes(x = `Percent of time spent on data-related work`)) + geom_histogram() + ylab("Number of respondents") + theme_bw() + ggtitle("Time Spent on Data-Related Work") + theme(plot.title = element_text(hjust = 0.5)) + xlab("Percent of time")
+
+
+mean(dat$`Percent of time spent on data-related work`, na.rm= TRUE)
+
+```
+
+##Years of experience
+Some visualizations of how long people have been in their current position and stuff.  Remove anyone who put they had been in their current position longer than their whole career, since this would be impossible.
+
+```{r}
+fixed_dat <- dat %>% filter(`Years in librarianship` >= `Years in current position`) 
+
+require(gridExtra)
+
+plot1 <- ggplot(fixed_dat, aes(x = `Years in current position`)) + geom_histogram() + ggtitle("Years in Current Position") + xlab("Years") + ylab("Number of Respondents") + theme_bw() + theme(plot.title = element_text(hjust = 0.5))
+
+plot2 <- ggplot(fixed_dat, aes(x = `Years in librarianship`)) + geom_histogram() + ggtitle("Years in Librarianship Total") + xlab("Years") + ylab("Number of Respondents") + theme_bw() + theme(plot.title = element_text(hjust = 0.5))
+
+grid.arrange(plot1, plot2, ncol=2)
+
+```
+
+
+For how many people is this their first library job, i.e. years in librarianship is equal to years in current position?
+```{r}
+n_first <- dat %>% filter(`Years in librarianship` == `Years in current position`) %>% nrow
+```
+```{r echo = F}
+cat("For", n_first, "participants, their current job is their first in the field of librarianship.")
+```
+
+##Educational Experience
+How many people have various degrees?  Sum up the counts and plot them as a percentage.
+```{r}
+degrees <- data.frame(degree = names(dat[14:20]), count = colSums(dat[14:20], na.rm = TRUE))
+degrees$percent <- degrees$count/nrow(dat) *100
+degrees$label <- paste("n =", degrees$count)
+
+ggplot(degrees, aes(x = reorder(degree, percent), y = percent)) + geom_bar(stat = "identity") + coord_flip() + ylab("Percent of Respondents\nwith Degree") + theme_bw() + ggtitle("Educational Experience") + scale_x_discrete(labels = function(x) lapply(strwrap(x, width = 35, simplify = FALSE), paste, collapse="\n")) + theme(plot.title = element_text(hjust = 0.5)) + xlab("Degree or certificate") + geom_text(aes(label = label, x = degree, y = count), position = position_dodge(width = 0.8), hjust = .8, color = "white")
+  
+
+dat <- dat %>% 
+  mutate(degrees_held = `ALA-accredited masters degree` + `Science masters degree` + `Other non-ALA, non-science masters degree` + `Undergraduate science degree` + `PhD (any discipline)` + `Specialized librarianship certification (such as data or medical library certification)` + `Other non-degree, non-certificate training in data, science, or specialized librarianship`)
+n_degrees <- dat %>% filter(degrees_held > 1) %>% nrow
+mean_degrees <- mean(dat$degrees_held)
+degrees
+```
+
+```{r echo = F}
+cat(n_degrees, "participants have more than one degree", "\nThe mean number of degrees held is", mean_degrees)
+```
+
+
+
+#Analysis of Skill/Knowledge Importance Ratings
+Do some data cleaning first. the relevant data (columns 21:68) need to be converted to an organization that ggplot2 can deal with - i.e. switch from wide to long.  
+```{r}
+##not all these packages know how to handle tibbles - make a regular data frame instead
+dat_df <- as.data.frame(dat)
+##need to handle the NA/don't know - convert these from a level to an NA
+dat_df[21:68] <- lapply(dat_df[21:68], recode_factor, "Don't know or N/A" = NA_character_)
+#fix ordered factor levels
+levs <- c("Not at all important", "Slightly important", "Important", "Very important", "Absolutely essential")
+dat_df[21:68] <- lapply(dat_df[21:68], factor, levels = levs)
+
+demo_rows <- 1:10
+data_mgmt1 <- 21:25
+data_mgmt2 <- 26:30
+tech <- 31:35
+eval_assess <- 36:38
+teaching <- 39:43
+library <- 44:49
+outreach <- 50:53
+involvement <- 54:56
+personal_attrs <- 57:63
+education <- 64:68
+subset_cols <- list(data_mgmt1, data_mgmt2, tech, eval_assess, teaching, library, outreach, involvement, personal_attrs, education)
+names(subset_cols) <- c("Data Management Skills, Part 1", "Data Management Skills, Part 2", "Technology Skills", "Evaluation and Assessment Skills", "Teaching Skills", "Library Skills", "Networking and Outreach Skills", "Professional Involvement", "Personal Attributes", "Education")
+
+```
+
+
+##Likert scale charts
+
+```{r}
+multiplot <- function(..., plotlist=NULL, file, cols=1, layout=NULL) {
+  library(grid)
+
+  # Make a list from the ... arguments and plotlist
+  plots <- c(list(...), plotlist)
+
+  numPlots = length(plots)
+
+  # If layout is NULL, then use 'cols' to determine layout
+  if (is.null(layout)) {
+    # Make the panel
+    # ncol: Number of columns of plots
+    # nrow: Number of rows needed, calculated from # of cols
+    layout <- matrix(seq(1, cols * ceiling(numPlots/cols)),
+                    ncol = cols, nrow = ceiling(numPlots/cols))
+  }
+
+ if (numPlots==1) {
+    print(plots[[1]])
+
+  } else {
+    # Set up the page
+    grid.newpage()
+    pushViewport(viewport(layout = grid.layout(nrow(layout), ncol(layout))))
+
+    # Make each plot, in the correct location
+    for (i in 1:numPlots) {
+      # Get the i,j matrix positions of the regions that contain this subplot
+      matchidx <- as.data.frame(which(layout == i, arr.ind = TRUE))
+
+      print(plots[[i]], vp = viewport(layout.pos.row = matchidx$row,
+                                      layout.pos.col = matchidx$col))
+    }
+  }
+}
+
+plots <- list()
+for (i in 1:length(subset_cols)) {
+  col_nums <- unlist(subset_cols[i])
+  lik_dat <- likert(dat_df[col_nums])
+  p <- plot(lik_dat, low.color ="grey78", high.color="grey8", neutral.color="grey45", neutral.color.ramp="grey46", text.color="black", text.size = 3) + ggtitle(names(subset_cols)[i]) + theme(plot.title = element_text(hjust = 0.5), legend.position = "none", axis.text.x = element_text(size = 6.5))
+  plots[[i]] <- p
+}
+multiplot(plotlist = plots, cols = 2)
+
+#make one plot with a legend to be able to put it on the final chart
+plot(lik_dat, low.color ="grey78", high.color="grey8", neutral.color="grey45", neutral.color.ramp="grey46", text.color="black", text.size = 3) + ggtitle(names(subset_cols)[i]) + theme(plot.title = element_text(hjust = 0.5), axis.text.x = element_text(size = 6.5))
+
+
+```
+
+
+#How many skills do people think are important?
+Basically, how much do you have to know?  
+
+We just want the likert_based items, which are columns 21:68.  For each row, count up how many times a person has given that rating.
+```{r}
+dat_df$absolutely_essential_count <- rowSums(dat_df[, 21:68] == "Absolutely essential", na.rm = TRUE)
+dat_df$very_imp_count <- rowSums(dat_df[, 21:68] == "Very important", na.rm = TRUE)
+dat_df$imp_count <- rowSums(dat_df[, 21:68] == "Important", na.rm = TRUE)
+dat_df$slightly_imp_count <- rowSums(dat_df[, 21:68] == "Slightly important", na.rm = TRUE)
+dat_df$not_imp_count <- rowSums(dat_df[, 21:68] == "Not at all important", na.rm = TRUE)
+```
+
+Let's make a boxplot of this.  We have to convert the data first.
+```{r}
+likert_counts <- gather(dat_df[, 73:77], rating, count, absolutely_essential_count:not_imp_count)
+levs <- c("absolutely_essential_count", "very_imp_count", "imp_count", "slightly_imp_count", "not_imp_count")
+likert_counts$rating <- factor(likert_counts$rating, levels = levs)
+likert_counts$rating <- plyr::revalue(likert_counts$rating, c("absolutely_essential_count" = "Absolutely essential", "very_imp_count" = "Very important", "imp_count" = "Important", "slightly_imp_count" = "Slightly important", "not_imp_count" = "Not at all important"))
+
+boxp <- ggplot(likert_counts, aes(x = rating, y = count)) + geom_boxplot() + xlab("") + ylab("Number of items (per individual)") + theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+Would it be easier to see this in a density plot?
+
+```{r}
+density <- ggplot(likert_counts, aes(x = count)) + geom_density(fill = "grey") + facet_wrap(~rating, nrow = 5) + xlab("Number of items (per individual)") + theme_bw()
+```
+Just for fun let's put them together
+
+```{r}
+grid.arrange(boxp, density, top = "Distribution of Number of Items Ranked at Each Level ", nrow = 1)
+```
+
+
+
+#Cluster Analysis
+
+Make a new converting all likert scale responses to one-hot encoded variables, then add back in the non-likert variables.  Also discard that one where the person said they've been in their current position longer than in librarianship total.
+```{r}
+set.seed(100)
+library(ade4)
+one_hot <- acm.disjonctif(dat_df[1:82, 21:68])
+one_hot <- cbind(dat_df[1:82, c(1:3, 5:10, 12:20, 71:77)], one_hot)
+```
+
+Calculate the similarities using gower distance
+```{r}
+library(cluster)
+gower_dist <- daisy(one_hot[, -1],
+                    metric = "gower")
+
+sil_width <- c(NA)
+for(i in 2:10){
+  
+  pam_fit <- pam(gower_dist,
+                 diss = TRUE,
+                 k = i)
+  
+  sil_width[i] <- pam_fit$silinfo$avg.width
+}
+
+# Plot sihouette width (higher is better)
+
+plot(1:10, sil_width,
+     xlab = "Number of clusters",
+     ylab = "Silhouette Width")
+lines(1:10, sil_width)
+
+```
+
+This suggests 2 clusters is best.
+
+
+
+```{r}
+pam_fit <- pam(gower_dist, diss = TRUE, k = 2)
+
+pam_results <- one_hot %>%
+  dplyr::select(-`Job title`) %>%
+  mutate(cluster = pam_fit$clustering) %>%
+  group_by(cluster) %>%
+  do(the_summary = summary(.))
+
+```
+
+
+Trying a different implementation of this
+```{r}
+library(fpc)
+pc = pamk(gower_dist, krange=1:5, criterion="asw")
+pc[2:3]
+
+hc.m = hclust(gower_dist, method="median")
+hc.s = hclust(gower_dist, method="single")
+hc.c = hclust(gower_dist, method="complete")
+plot(hc.m)
+plot(hc.s)
+plot(hc.c)
+
+
+table(cutree(hc.c, k=2), cutree(hc.s, k=2))
+```
+
+Looking at the complete clustering.  The first group on the dendrogram ends with 60, so let's see which observation that is.
+```{r}
+which(hc.c$order == 81)
+```
+
+This tells us that group 1 includes observations 1:25 and group 2 observations 26:82
+
+```{r}
+group1l <- hc.c$order[1:25]
+group2l <- hc.c$order[26:82]
+
+dat_df[,5:20] <- lapply(dat_df[, 5:20], as.factor)
+
+generalists <- dat_df[group1l, ]
+specialists <- dat_df[group2l, ]
+
+specialists$group <- "Specialists"
+generalists$group <- "Generalists"
+
+grouped <- rbind(specialists, generalists)
+```
+
+Look at groupings
+```{r}
+for (i in 1:length(subset_cols)) {
+  col_nums <- unlist(subset_cols[i])
+  lik_dat <- likert(grouped[, col_nums], grouping = grouped$group)
+  p <- plot(lik_dat) + ggtitle(names(subset_cols)[i])+ theme(plot.title = element_text(hjust = 0.5)) + scale_x_discrete(labels = function(x) lapply(strwrap(x, width = 35, simplify = FALSE), paste, collapse="\n"), "") + scale_fill_grey() 
+  print(p)
+}
+```
+
+
+
+```{r}
+generalists[5:10] <- lapply(generalists[5:10], as.numeric)
+generalists[5:10] <- generalists[5:10] - 1
+discipline1 <- data.frame(discipline = names(generalists[5:10]), count = colSums(generalists[5:10], na.rm = TRUE))
+discipline1$percent <- discipline1$count/nrow(generalists) *100
+discipline1$label <- paste("n =", discipline1$count)
+
+
+specialists[5:10] <- lapply(specialists[5:10], as.numeric)
+specialists[5:10] <- specialists[5:10] - 1
+discipline2 <- data.frame(discipline = names(specialists[5:10]), count = colSums(specialists[5:10], na.rm = TRUE))
+discipline2$percent <- discipline2$count/nrow(specialists) *100
+discipline2$label <- paste("n =", discipline2$count)
+
+discipline1$Group <- "Generalists"
+discipline2$Group <- "Specialists"
+
+discipline <- rbind(discipline1, discipline2)
+
+ggplot(discipline, aes(x = reorder(discipline, percent), y = percent, fill = Group)) + geom_bar(stat = "identity", position = "dodge") + coord_flip() + ylab("Percent of Respondents\nSupporting Discipline") + theme_bw() + ggtitle("Disciplinary Support by Group") + scale_x_discrete(labels = function(x) lapply(strwrap(x, width = 35, simplify = FALSE), paste, collapse="\n")) + theme(plot.title = element_text(hjust = 0.5)) + xlab("Discipline") + scale_fill_grey()
+
+```
+
+```{r}
+generalists <- generalists %>% 
+  mutate(disciplines_served = `Biomedical and/or health sciences` + `Life sciences` + `Physical sciences`+ `Mathematics and/or statistics` + `Engineering and/or computer science` + `Social sciences`)
+n_disciplines1 <- generalists %>% filter(disciplines_served > 1) %>% nrow
+mean_disciplines1 <- mean(generalists$disciplines_served)
+
+specialists <- specialists %>% 
+  mutate(disciplines_served = `Biomedical and/or health sciences` + `Life sciences` + `Physical sciences`+ `Mathematics and/or statistics` + `Engineering and/or computer science` + `Social sciences`)
+n_disciplines2 <- specialists %>% filter(disciplines_served > 1) %>% nrow
+mean_disciplines2 <- mean(specialists$disciplines_served)
+
+```
+```{r echo = F}
+cat(n_disciplines1, "participants in the generalist group serve more than one discipline", "\nThe mean number of disciplines served is", mean_disciplines1, ". ", n_disciplines2, "participants in the specialist group serve more than one discipline", "\nThe mean number of disciplines served is", mean_disciplines2)
+
+
+```
+
+```{r}
+generalists[14:20] <- lapply(generalists[14:20], as.numeric)
+generalists[14:20] <- generalists[14:20] - 1
+degree1 <- data.frame(degree = names(generalists[14:20]), count = colSums(generalists[14:20], na.rm = TRUE))
+degree1$percent <- degree1$count/nrow(generalists) *100
+degree1$label <- paste("n =", degree1$count)
+
+specialists[14:20] <- lapply(specialists[14:20], as.numeric)
+specialists[14:20] <- specialists[14:20] - 1
+degree2 <- data.frame(degree = names(specialists[14:20]), count = colSums(specialists[14:20], na.rm = TRUE))
+degree2$percent <- degree2$count/nrow(specialists) *100
+degree2$label <- paste("n =", degree2$count)
+
+
+degree1$Group <- "Generalists"
+degree2$Group <- "Specialists"
+
+degree3 <- rbind(degree1, degree2)
+
+ggplot(degree3, aes(x = reorder(degree, percent), y = percent, fill = Group)) + geom_bar(stat = "identity", position = "dodge") + coord_flip() + ylab("Percent of Respondents\nwith Degree") + theme_bw() + ggtitle("Educational Experience by Group") + scale_x_discrete(labels = function(x) lapply(strwrap(x, width = 35, simplify = FALSE), paste, collapse="\n")) + theme(plot.title = element_text(hjust = 0.5)) + xlab("Degree or certificate") + scale_fill_grey()
+
+
+
+```
+
+```{r}
+generalists <- generalists %>% 
+  mutate(degrees_held = `ALA-accredited masters degree` + `Science masters degree` + `Other non-ALA, non-science masters degree` + `Undergraduate science degree` + `PhD (any discipline)` + `Specialized librarianship certification (such as data or medical library certification)` + `Other non-degree, non-certificate training in data, science, or specialized librarianship`)
+n_degrees1 <- generalists %>% filter(degrees_held > 1) %>% nrow
+mean_degrees1 <- mean(generalists$degrees_held)
+
+specialists <- specialists %>% 
+  mutate(degrees_held = `ALA-accredited masters degree` + `Science masters degree` + `Other non-ALA, non-science masters degree` + `Undergraduate science degree` + `PhD (any discipline)` + `Specialized librarianship certification (such as data or medical library certification)` + `Other non-degree, non-certificate training in data, science, or specialized librarianship`)
+n_degrees2 <- specialists %>% filter(degrees_held > 1) %>% nrow
+mean_degrees2 <- mean(specialists$degrees_held)
+
+```
+```{r echo = F}
+cat(n_degrees1, "participants in the generalist group have more than one degree and the mean number of degrees held is", mean_degrees1, ". ", n_degrees2, "participants in the specialist group have more than one degree and The mean number of degrees held is", mean_degrees2)
+```
+
+```{r}
+
+plot1 <- ggplot(grouped, aes(y = `Years in current position`, x = group)) + geom_boxplot() + ggtitle("Years in Current Position by Group") + ylab("Years") + theme_bw() + theme(plot.title = element_text(hjust = 0.5)) + xlab("")
+
+plot2 <- ggplot(grouped, aes(y = `Years in librarianship`, x = group)) + geom_boxplot() + ggtitle("Years in Librarianship Total by Group") + ylab("Years") + theme_bw() + theme(plot.title = element_text(hjust = 0.5)) + xlab("")
+
+grid.arrange(plot1, plot2, ncol=2)
+```
+
+
+```{r}
+n_first1 <- specialists %>% filter(`Years in librarianship` == `Years in current position`) %>% nrow
+n_first2 <- generalists %>% filter(`Years in librarianship` == `Years in current position`) %>% nrow
+
+```
+```{r echo = F}
+cat("For", n_first1, "Specialists, their current job is their first in the field of librarianship.  For", n_first2, "generalists their current job is their first in the field.")
+```
+
+```{r}
+generalists$data_time <- as.numeric(as.character(generalists$`Percent of time spent on data-related work`))
+specialists$data_time <- as.numeric(as.character(specialists$`Percent of time spent on data-related work`))
+
+
+plot1 <- specialists %>% ggplot(aes(x = data_time)) + geom_density() + ylab("Number of respondents") + theme_bw() + ggtitle("Subject Specialists") + theme(plot.title = element_text(hjust = 0.5)) + xlab("Percent of time")
+
+plot2 <- generalists %>% ggplot(aes(x = data_time)) + geom_density() + ylab("Number of respondents") + theme_bw() + ggtitle("Data Generalists") + theme(plot.title = element_text(hjust = 0.5)) + xlab("Percent of time")
+
+
+grid.arrange(plot1, plot2, ncol=2, top="Time Spent on Data-related Work")
+```
+Or maybe as a boxplot
+```{r}
+grouped$data_time <- as.numeric(as.character(grouped$`Percent of time spent on data-related work`))
+ggplot(grouped, aes(x = group, y = data_time)) + geom_boxplot() + ggtitle("Time Spent on Data-related Work") + theme_bw()
+```
+
+
+```{r}
+generalists$majority_data_time <- ifelse(generalists$data_time >= 50,
+c(1), c(0)) 
+
+specialists$majority_data_time <- ifelse(specialists$data_time >= 50,
+c(1), c(0)) 
+
+
+
+```
+
+##Tests of statistical significance
+Let's do some t-tests!
+Mean number of disciplines served
+```{r}
+t.test(generalists$disciplines_served, specialists$disciplines_served)
+
+```
+Mean years in current position
+```{r}
+t.test(generalists$`Years in current position`, specialists$`Years in current position`)
+```
+Time in profession overall 
+```{r}
+t.test(specialists$`Years in librarianship`, generalists$`Years in librarianship`)
+
+```
+percent of time on data-related tasks
+```{r}
+t.test(specialists$data_time, generalists$data_time)
+
+```
+Degrees and certificates
+```{r}
+t.test(specialists$degrees_held, generalists$degrees_held)
+```
+Number of tasks considered Absolutely essential
+```{r}
+t.test(specialists$absolutely_essential_count, generalists$absolutely_essential_count)
+
+```
+```{r}
+t.test(specialists$not_imp_count, generalists$not_imp_count)
+```
+
+
