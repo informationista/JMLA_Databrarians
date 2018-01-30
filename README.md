@@ -1,4 +1,4 @@
-# JMLA_Databrarians
+# Defining Data Librarianship: A Survey of Competencies, Skills, and Training
 
 This repository contains code and data related to the forthcoming article "Defining Data Librarianship: A Survey of Competencies, Skills, and Training," which will be published in the *Journal of the Medical Library Association*.
 
